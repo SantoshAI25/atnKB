@@ -11,4 +11,7 @@ wheels/
 .env
 /zipfile
 chatbot.py
+ingest.py
 data (4).json
+Pinecone/
+Pinecone\ingest.py

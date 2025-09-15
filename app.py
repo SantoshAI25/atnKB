@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 from postgres_utils import run_postgres_query
 from pinecone_utils import search_with_filters
-from llm_utils import llm
+from llm_utils import llm, safe_tool_output
 
 # ========================
 # 1. ENV + APP SETUP
@@ -184,7 +184,9 @@ def chat():
                 result_text = "\n".join(
                     [doc.page_content for doc in results]
                 ) if results else "No results found."
-                tool_results[call.id] = result_text
+                # tool_results[call.id] = result_text
+                tool_results[call.id] = safe_tool_output(result_text)
+
 
         # Add tool outputs back into conversation
         for tool_id, result in tool_results.items():
