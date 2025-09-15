@@ -14,3 +14,7 @@ chatbot.py
 data (4).json
 ingest.py
 data (6).json
+pine_ingest.py
+post_ingest.py
+data (10).json
+.flask_session

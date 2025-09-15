@@ -2,11 +2,16 @@ import os
 import psycopg2
 import json
 from flask import Flask, render_template, request, session, jsonify
+from flask_session import Session
 from dotenv import load_dotenv
+
+# === LangSmith ===
+from langsmith import Client
+from langsmith.run_helpers import traceable
 
 from postgres_utils import run_postgres_query
 from pinecone_utils import search_with_filters
-from llm_utils import llm
+from llm_utils import llm, safe_tool_output
 
 # ========================
 # 1. ENV + APP SETUP
@@ -14,6 +19,14 @@ from llm_utils import llm
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+
+# LangSmith setup
+os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGSMITH_API_KEY")
+os.environ["LANGCHAIN_TRACING_V2"] = os.getenv("LANGSMITH_TRACING")
+os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGSMITH_PROJECT")
+os.environ["LANGCHAIN_ENDPOINT"] = os.getenv("LANGSMITH_ENDPOINT")
+
+client = Client()
 
 # PostgreSQL connection details from .env
 DB_CONFIG = {
@@ -37,13 +50,23 @@ if not OPENAI_API_KEY or not PINECONE_API_KEY:
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "supersecret")
 
+# ---- Server-side sessions ----
+app.config["SESSION_TYPE"] = "filesystem"  # or "redis", "sqlalchemy"
+app.config["SESSION_FILE_DIR"] = "./.flask_session"
+app.config["SESSION_PERMANENT"] = False
+Session(app)
+
 
 def ensure_session():
-    """Make sure session has default state."""
+    """Make sure session has default state and prevent bloat."""
     if "messages" not in session:
         session["messages"] = []
     if "last_customer" not in session:
         session["last_customer"] = None
+
+    # keep session light (last 20 messages)
+    if len(session["messages"]) > 20:
+        session["messages"] = session["messages"][-20:]
 
 
 # ========================
@@ -61,34 +84,38 @@ Schema:
 Table: kb_table
 Important Columns:
 
-    "Customer ID" TEXT,
-    "Sales_Rep Name" TEXT,
-    "Customer Name" TEXT,
-    "Email" TEXT,
-    "Qualifying Lead" BOOLEAN,
-    "Lead qualification Reason" TEXT,
-    "Ad Lead" BOOLEAN,
-    "Ad Lead Qualification Reason" TEXT,
-    "Package of Customer Interest" TEXT,
-    "Tags from GHL" TEXT,
-    "Phone Number" TEXT,
-    "country" TEXT,
-    "Pain points Objections Outcomes" TEXT,
-    "Investment Level" TEXT,
-    "Investable Assets" TEXT,
-    "Engagement Level" TEXT,
-    "Risk Profile" TEXT,
-    "Persona Type" TEXT,
-    "Postal Code" VARCHAR(200),
-    "Package Purchased" TEXT
+"Customer ID" TEXT,
+"Customer Name" TEXT,
+"Email" TEXT,
+"Phone Number" TEXT,
+"country" TEXT,
+"Sales_Rep Name" TEXT,
+"Qualifying Lead" TEXT,
+"Package Purchased" TEXT,
+"Postal Code" TEXT,
+"Ad Lead" TEXT,
+"Package of Customer Interest" TEXT,
+"Investment Level" TEXT,
+"Investable Assets" TEXT,
+"monthly passive income goal of customer" TEXT,
+"Investment Capacity" TEXT,
+"Engagement Level" TEXT,
+"Amount" TEXT,
+"Amount Received" TEXT,
+"Total Amount Funded" TEXT,
+"Account status" TEXT,
+"Date of Lead Creation" TEXT,
+"Meeting Date" TEXT,
+"Customer Goals filled in TF by Customer" TEXT,
+"Credit Score" TEXT,
+"Date Of Funding" TEXT,
+"Form Submission Date" TEXT,
+"TF Ending" TEXT
 
 Rules for SQL:
 - Always wrap column names in double quotes (" ") because they contain spaces.
 - Table name is always kb_table.
-- Example queries:
-    - Get customer ID for Louis Davis → SELECT "Customer ID" FROM kb_table WHERE "Customer Name" ILIKE '%Louis Davis%';
-    - Count customers in Diamond Package → SELECT COUNT(*) FROM kb_table WHERE "Package of Customer Interest" ILIKE '%Diamond%';
-    - List all customer names → SELECT "Customer Name" FROM kb_table LIMIT 456;
+- If the user query about a specific column and there are missing entries, ignore  the missing entries and use the rows with data available in that column.
 """,
             "parameters": {
                 "type": "object",
@@ -106,7 +133,7 @@ Rules for SQL:
         "type": "function",
         "function": {
             "name": "pinecone_tool",
-            "description": "Search semantic knowledge base for customer insights, preferences, or unstructured data like pain points.",
+            "description": "Search semantic knowledge base for customer insights, preferences, or unstructured data like pain points, differences.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -131,6 +158,12 @@ def index():
     return render_template("chat.html", messages=session["messages"])
 
 
+@traceable(name="chat_pipeline")
+def run_chat_pipeline(conversation, tools):
+    """Traceable wrapper for LLM call"""
+    return llm.invoke(conversation, tools=tools)
+
+
 @app.route("/chat", methods=["POST"])
 def chat():
     ensure_session()
@@ -145,21 +178,24 @@ def chat():
     # ========== STEP 1: Call LLM with tools ==========
     conversation = [
         {"role": "system", "content": """
-You are a friendly but sharp customer insights chatbot for ATN Unlimited team based on the Knowledge Base that helps the team gain more insights about customers and understand them to improve internal strategy.
-You have access to two tools:
-- postgres_tool → for structured data like customer_id, number of customers, filtering by attributes.
-- pinecone_tool → for semantic insights like customer pain points, goals, or free-text knowledge base queries.
+        You are a friendly yet sharp customer insights assistant for the ATN Unlimited team.  
+        Your purpose is to help the team understand customers better and surface actionable insights.  
 
-Rules:
-1. Always try postgres_tool when customer_id, counts, or structured fields are requested.
-2. Use pinecone_tool when the query is about pain points, unstructured notes, or insights.
-3. Always return clear, natural answers using tool results. Never say "I cannot access". If a query fails, retry with simpler SQL.
-4. Keep answers concise and human-friendly.
-5. At the end of your response, suggest 1-2 relevant follow-up question the team might ask next.
-"""}
+        You have access to two tools:  
+        - postgres_tool → structured data (IDs, counts, filtering by attributes).  
+        - pinecone_tool → semantic queries (pain points, goals, unstructured notes).  
+
+        Rules:
+        1. Use postgres_tool for structured queries.  
+        2. Use pinecone_tool for semantic/unstructured queries.  
+        3. Provide clear, natural answers based on tool results.  
+        4. If a query fails, retry with a simpler approach.  
+        5. Keep responses concise, human-friendly, and insight-driven.  
+        6. End every response with 1–2 smart follow-up questions.  
+        """}
     ] + msgs[-10:]
 
-    response = llm.invoke(conversation, tools=TOOLS)
+    response = run_chat_pipeline(conversation, TOOLS)
 
     answer = ""
     tool_results = {}
@@ -168,7 +204,7 @@ Rules:
     if getattr(response, "tool_calls", None):
         followup_conversation = conversation + [response]
 
-        for call in response.tool_calls: 
+        for call in response.tool_calls:
             fn_name = call.function.name
             args = json.loads(call.function.arguments)
 
@@ -181,7 +217,7 @@ Rules:
                 result_text = "\n".join(
                     [doc.page_content for doc in results]
                 ) if results else "No results found."
-                tool_results[call.id] = result_text
+                tool_results[call.id] = safe_tool_output(result_text)
 
         # Add tool outputs back into conversation
         for tool_id, result in tool_results.items():
@@ -192,7 +228,7 @@ Rules:
             })
 
         # Final LLM response
-        final_response = llm.invoke(followup_conversation)
+        final_response = run_chat_pipeline(followup_conversation, tools=None)
         answer = final_response.content
 
     else:
@@ -207,4 +243,9 @@ Rules:
 
 # ------------- run -------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=True)
+    app.run(
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "5000")),
+        debug=True,
+        use_reloader=False  # important for Windows to avoid socket error
+    )
