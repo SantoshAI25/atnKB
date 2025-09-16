@@ -78,10 +78,10 @@ TOOLS = [
         "function": {
             "name": "postgres_tool",
             "description": """
-Run SQL queries on the atn_table.
+Run SQL queries on the kb_table.
 
 Schema:
-Table: atn_table
+Table: kb_table
 Important Columns:
 
 "Customer ID" TEXT,
@@ -114,15 +114,26 @@ Important Columns:
 
 Rules for SQL:
 - Always wrap column names in double quotes (" ") because they contain spaces.
-- Table name is always atn_table.
-- If the user query about a specific column and there are missing entries, ignore  the missing entries and use the rows with data available in that column.
+- Table name is always kb_table.
+- Never use LIKE for name columns.
+- Always use ILIKE for case-insensitive matching.
+- For "Customer Name" searches, normalize by removing spaces:
+  WHERE LOWER(REGEXP_REPLACE("Customer Name", '\s+', '', 'g'))
+        LIKE LOWER(REGEXP_REPLACE('%{name}%', '\s+', '', 'g'));
+- If the user query is about averages, minimum, maximum, or totals:
+  * Use aggregate functions: AVG(), MIN(), MAX(), COUNT().
+  * Example: SELECT AVG("Investable Assets") FROM kb_table WHERE "country" = 'US';
+  * Example: SELECT MAX("Credit Score") FROM kb_table;
+  * Example: SELECT MIN("Investment Level") FROM kb_table;
+- If the user query is about a specific column and there are missing entries, ignore the missing entries and use the rows with data available in that column.
+
 """,
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "A valid SQL query using atn_table."
+                        "description": "A valid SQL query using kb_table."
                     }
                 },
                 "required": ["query"]
@@ -192,6 +203,7 @@ def chat():
         4. If a query fails, retry with a simpler approach.  
         5. Keep responses concise, human-friendly, and insight-driven.  
         6. End every response with 1–2 smart follow-up questions.  
+        7. If the User ask for a specific column or information that is not available, respond with "No results found."
         """}
     ] + msgs[-10:]
 
