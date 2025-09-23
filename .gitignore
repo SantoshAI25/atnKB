@@ -12,6 +12,9 @@ wheels/
 /zipfile
 chatbot.py
 ingest.py
-data (4).json
 .flask_session
 data (10).json
+Pinecone/ingest.py
+Pinecone
+data (12).json
+updatePG.py

@@ -78,56 +78,57 @@ TOOLS = [
         "function": {
             "name": "postgres_tool",
             "description": """
-Run SQL queries on the kb_table.
+                Run SQL queries on the kb_table.
 
-Schema:
-Table: kb_table
-Important Columns:
+                Schema:
+                Table: kb_table
+                Important Columns:
 
-"Customer ID" TEXT,
-"Customer Name" TEXT,
-"Email" TEXT,
-"Phone Number" TEXT,
-"country" TEXT,
-"Sales_Rep Name" TEXT,
-"Qualifying Lead" TEXT,
-"Package Purchased" TEXT,
-"Postal Code" TEXT,
-"Ad Lead" TEXT,
-"Package of Customer Interest" TEXT,
-"Investment Level" TEXT,
-"Investable Assets" TEXT,
-"monthly passive income goal of customer" TEXT,
-"Investment Capacity" TEXT,
-"Engagement Level" TEXT,
-"Amount" TEXT,
-"Amount Received" TEXT,
-"Total Amount Funded" TEXT,
-"Account status" TEXT,
-"Date of Lead Creation" TEXT,
-"Meeting Date" TEXT,
-"Customer Goals filled in TF by Customer" TEXT,
-"Credit Score" TEXT,
-"Date Of Funding" TEXT,
-"Form Submission Date" TEXT,
-"TF Ending" TEXT
+                "Customer ID" TEXT,
+                "Customer Name" TEXT,
+                "Email" TEXT,
+                "Phone Number" TEXT,
+                "country" TEXT,
+                "Sales_Rep Name" TEXT,
+                "Qualifying Lead" TEXT,
+                "Package Purchased" TEXT,
+                "Postal Code" TEXT,
+                "Ad Lead" TEXT,
+                "Package of Customer Interest" TEXT,
+                "Investment Level" TEXT,
+                "Investable Assets" TEXT,  -- Discussed in the meeting during the demo with the sales rep
+                "monthly passive income goal of customer" TEXT,  -- Filled in by the customer in the forms
+                "Investment Capacity" TEXT,  -- Filled in by the customer in the forms
+                "Engagement Level" TEXT,
+                "Amount" TEXT,
+                "Amount Received" TEXT,
+                "Total Amount Funded" TEXT,
+                "Account status" TEXT,
+                "Date of Lead Creation" TEXT,
+                "Meeting Date" TEXT,
+                "Customer Goals filled in TF by Customer" TEXT,
+                "Credit Score" TEXT,
+                "Date Of Funding" TEXT,
+                "Form Submission Date" TEXT,
+                "TF Ending" TEXT
 
-Rules for SQL:
-- Always wrap column names in double quotes (" ") because they contain spaces.
-- Table name is always kb_table.
-- Never use LIKE for name columns.
-- Always use ILIKE for case-insensitive matching.
-- For "Customer Name" searches, normalize by removing spaces:
-  WHERE LOWER(REGEXP_REPLACE("Customer Name", '\s+', '', 'g'))
-        LIKE LOWER(REGEXP_REPLACE('%{name}%', '\s+', '', 'g'));
-- If the user query is about averages, minimum, maximum, or totals:
-  * Use aggregate functions: AVG(), MIN(), MAX(), COUNT().
-  * Example: SELECT AVG("Investable Assets") FROM kb_table WHERE "country" = 'US';
-  * Example: SELECT MAX("Credit Score") FROM kb_table;
-  * Example: SELECT MIN("Investment Level") FROM kb_table;
-- If the user query is about a specific column and there are missing entries, ignore the missing entries and use the rows with data available in that column.
+                Rules for SQL:
+                - Always wrap column names in double quotes (" ") because they contain spaces.
+                - Table name is always kb_table.
+                - Never use LIKE for name columns.
+                - Always use ILIKE for case-insensitive matching.
+                - For "Customer Name" searches, normalize by removing spaces:
+                WHERE LOWER(REGEXP_REPLACE("Customer Name", '\s+', '', 'g'))
+                        LIKE LOWER(REGEXP_REPLACE('%{name}%', '\s+', '', 'g'));
+                - If the user query is about averages, minimum, maximum, or totals:
+                * Use aggregate functions: AVG(), MIN(), MAX(), COUNT().
+                * Example: SELECT AVG("Investable Assets") FROM kb_table WHERE "country" = 'US';
+                * Example: SELECT MAX("Credit Score") FROM kb_table;
+                * Example: SELECT MIN("Investment Level") FROM kb_table;
+                - If the user query is about a specific column and there are missing entries, ignore the missing entries and use the rows with data available in that column.
 
-""",
+            """
+,
             "parameters": {
                 "type": "object",
                 "properties": {
